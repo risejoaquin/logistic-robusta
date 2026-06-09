@@ -30,6 +30,13 @@ func main() {
 		port = "3000"
 	}
 
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/admin", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
 	http.HandleFunc("/webhook", WebhookHandler)
 	http.HandleFunc("/monitor", HandleMonitorInterface)
 	http.HandleFunc("/monitor/stream", HandleMonitorStream)
