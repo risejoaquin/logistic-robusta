@@ -65,19 +65,60 @@ func crearTablasAutomaticas() {
 		direccion_entrega TEXT,
 		metodo_pago VARCHAR(50),
 		total NUMERIC,
-		status VARCHAR(50) DEFAULT 'PENDING'
+		status VARCHAR(50) DEFAULT 'PENDING',
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS earnings (
 		id SERIAL PRIMARY KEY,
 		amount NUMERIC NOT NULL,
-		order_id INT
+		order_id INT,
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 	);
 	`
 	_, err := DB.Exec(context.Background(), query)
 	if err != nil {
 		log.Printf("ERROR: Fallo inicializando tablas del MVP: %v", err)
 	} else {
+		// Intentando añadir las columnas para dbs existentes
+		DB.Exec(context.Background(), "ALTER TABLE orders ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+		DB.Exec(context.Background(), "ALTER TABLE earnings ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+		
+		// Llenar inventario para al menos 10 sushis si está vacío o para pruebas
+		seedInventory(DB)
+
 		log.Println("SUCCESS: Architectura de motor PostgreSQL y esquemas DDL en línea.")
+	}
+}
+
+func seedInventory(db *pgxpool.Pool) {
+	var count int
+	db.QueryRow(context.Background(), "SELECT COUNT(*) FROM inventory").Scan(&count)
+	if count < 15 {
+		items := []struct{name string; qty int}{
+			{"arroz 265g", 10},
+			{"proteinas 50g", 10},
+			{"pollo 40g", 10},
+			{"pepino 20g", 10},
+			{"zanahoria 15g", 10},
+			{"cebolla 10g", 10},
+			{"queso_philadelphia 30g", 10},
+			{"aderezo 10g", 10},
+			{"salsa_soya 1", 10},
+			{"salsa_roja 1", 10},
+			{"contenedor_7x7 1", 10},
+			{"p200 1", 10},
+			{"palillos_chinos 1", 10},
+			{"aluminio 1", 10},
+			{"servilletas 2", 10},
+		}
+
+		for _, item := range items {
+			_, err := db.Exec(context.Background(), "INSERT INTO inventory (item, quantity) VALUES ($1, $2)", item.name, item.qty)
+			if err != nil {
+				log.Printf("Error seeding inventory %s: %v", item.name, err)
+			}
+		}
+		log.Println("✅ INVENTARIO SEMBRADO PARA 10 SUSHIS DE PRUEBA")
 	}
 }
 

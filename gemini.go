@@ -8,10 +8,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 type GeminiDecision struct {
 	ResponseText      string   `json:"response_text"`
+	SendMenuImage     bool     `json:"send_menu_image"`
 	IsOrderComplete   bool     `json:"is_order_complete"`
 	OrderDetails      string   `json:"order_details"`
 	DeliveryAddress   string   `json:"delivery_address"`
@@ -23,7 +25,7 @@ type GeminiDecision struct {
 type GeminiRequest struct {
 	Contents         []MessageContent `json:"contents"`
 	SystemInstruction *SystemInst     `json:"system_instruction,omitempty"`
-	GenerationConfig  GenConfig       `json:"generationConfig"`
+	GenerationConfig  GenConfig       `json:"generation_config"`
 }
 
 type MessageContent struct {
@@ -40,7 +42,7 @@ type Part struct {
 }
 
 type GenConfig struct {
-	ResponseMimeType string `json:"responseMimeType"`
+	ResponseMimeType string `json:"response_mime_type"`
 	Temperature      float64 `json:"temperature"`
 }
 
@@ -60,8 +62,11 @@ Tu objetivo es ayudar a los clientes a armar su orden de sushi paso a paso por W
 Reglas de negocio:
 - Un rollo estándar cuesta $120 MXN, un rollo especial $150 MXN (inventa o calcula precios atractivos pero rentables).
 - Si el cliente requiere envío a domicilio, suma SIEMPRE $40 MXN al total, aplica para cualquier lugar.
-- Para lograr "is_order_complete" = true, debes haber recolectado: qué quieren comer, si es para recoger (PICKUP) o enviar a domicilio (con dirección), y el método de pago (Efectivo, Tarjeta, Transferencia).
-- Mientras "is_order_complete" sea false, en "response_text" hazles las preguntas necesarias (ej. "¿Gusta envío a domicilio o pasaría por él?").
+- Si el cliente te saluda por primera vez (el historial está vacío o solo tiene un mensaje), DEBES darle la bienvenida al restaurante SUSHI LOSPLEBES de manera muy amable e indicar "send_menu_image" = true en tu JSON para que el sistema le envíe la foto del menú.
+- Métodos de pago aceptados: "Efectivo" o "Transferencia".
+- Si el cliente elige "Transferencia", pásale la CLABE: 012345678912345678 a nombre de SUSHI LOSPLEBES y dile que envíe la foto del comprobante por aquí, su orden será validada por un humano. El "payment_method" en el JSON debe ser "TRANSFERENCIA (Por validar comprobante)".
+- Para lograr "is_order_complete" = true, debes haber recolectado: qué quieren comer, si es para recoger (PICKUP) o enviar a domicilio (con dirección), y el método de pago (Efectivo o Transferencia).
+- Mientras "is_order_complete" sea false, en "response_text" hazles las preguntas necesarias (ej. "¿Gusta envío a domicilio o pasaría por él? ¿Y cómo desea pagar, Efectivo o Transferencia?").
 
 Descuento de Inventario:
 Cuando el pedido esté completado ("is_order_complete" = true), calcula los insumos que se consumirán por cada rollo pedido y ponlos en la lista "inventory_to_remove". Por cada 1 rollo de sushi debes descontar aproximadamente:
@@ -76,7 +81,7 @@ Cuando el pedido esté completado ("is_order_complete" = true), calcula los insu
 - "salsa_soya 1"
 - "salsa_roja 1"
 - "contenedor_7x7 1"
-- "p200 1"
+- "p200 1" (envases pequeños para el aderezo y salsa de soya)
 - "palillos_chinos 1"
 - "aluminio 1"
 - "servilletas 2"
@@ -84,6 +89,7 @@ Cuando el pedido esté completado ("is_order_complete" = true), calcula los insu
 ESTRUCTURA STRICTA MULTI-PROPOSITO (SIEMPRE RETORNA JSON en responseMimeType="application/json"):
 {
   "response_text": "Texto a enviar por WhatsApp.",
+  "send_menu_image": boolean,
   "is_order_complete": boolean,
   "order_details": "Ej: 1x Rollo Empanizado, 1x Té helado. Nota: sin cebollín.",
   "delivery_address": "Calle Falsa 123 o 'PICKUP'",
@@ -95,13 +101,35 @@ ESTRUCTURA STRICTA MULTI-PROPOSITO (SIEMPRE RETORNA JSON en responseMimeType="ap
 
 var chatMemory = make(map[string]string)
 
+func callGeminiWithModel(model string, apiKey string, requestBody GeminiRequest) ([]byte, int, error) {
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	return bodyBytes, resp.StatusCode, err
+}
+
 func CallGemini(phone string, userMessage string) (GeminiDecision, error) {
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	apiKey := strings.TrimSpace(strings.Trim(os.Getenv("GEMINI_API_KEY"), "\""))
 	if apiKey == "" {
 		return GeminiDecision{}, fmt.Errorf("GEMINI_API_KEY no configurado")
 	}
-
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey
 
 	// Agregar a historial muy básico (limitar a últimos 500 chars para no crecer infinito)
 	historial := chatMemory[phone]
@@ -127,32 +155,30 @@ func CallGemini(phone string, userMessage string) (GeminiDecision, error) {
 		},
 	}
 
-	jsonData, err := json.Marshal(reqData)
-	if err != nil {
-		return GeminiDecision{}, err
+	// Fallback strategy to handle latest models in 2026
+	modelsToTry := []string{"gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"}
+	var bodyBytes []byte
+	var statusCode int
+	var err error
+
+	for _, model := range modelsToTry {
+		bodyBytes, statusCode, err = callGeminiWithModel(model, apiKey, reqData)
+		if err != nil {
+			return GeminiDecision{}, err
+		}
+		if statusCode == http.StatusOK {
+			break
+		}
+		log.Printf("WARNING Gemini returned %d for model %s: %s", statusCode, model, string(bodyBytes))
+		if statusCode != http.StatusNotFound && statusCode != http.StatusBadRequest {
+			// Si no es un problema del modelo sino de autenticación o quota, salir.
+			break
+		}
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return GeminiDecision{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return GeminiDecision{}, err
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return GeminiDecision{}, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("ERROR Gemini Api: %s", string(bodyBytes))
-		return GeminiDecision{}, fmt.Errorf("gemini status code %d", resp.StatusCode)
+	if statusCode != http.StatusOK {
+		LogSystemError("GEMINI_API", "Error completando petición a Gemini", string(bodyBytes), statusCode)
+		return GeminiDecision{}, fmt.Errorf("todos los intentos a gemini fallaron. ultimo status code %d: %s", statusCode, string(bodyBytes))
 	}
 
 	var geminiResp GeminiResponse
@@ -165,6 +191,19 @@ func CallGemini(phone string, userMessage string) (GeminiDecision, error) {
 	}
 
 	rawJsonText := geminiResp.Candidates[0].Content.Parts[0].Text
+	
+	// Strip possible markdown json formatting
+	rawJsonText = strings.TrimSpace(rawJsonText)
+	if strings.HasPrefix(rawJsonText, "```json") {
+		rawJsonText = strings.TrimPrefix(rawJsonText, "```json")
+	} else if strings.HasPrefix(rawJsonText, "```") {
+		rawJsonText = strings.TrimPrefix(rawJsonText, "```")
+	}
+	if strings.HasSuffix(rawJsonText, "```") {
+		rawJsonText = strings.TrimSuffix(rawJsonText, "```")
+	}
+	rawJsonText = strings.TrimSpace(rawJsonText)
+
 	var decision GeminiDecision
 	if err := json.Unmarshal([]byte(rawJsonText), &decision); err != nil {
 		return GeminiDecision{}, fmt.Errorf("error al mapear gemini a decision json: %v", err)

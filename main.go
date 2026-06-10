@@ -5,10 +5,38 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
+func basicAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Bypass CORS preflight requests
+		if r.Method == "OPTIONS" {
+			next(w, r)
+			return
+		}
+
+		user := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_USER"), "\""))
+		pass := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_PASS"), "\""))
+		
+		// If credentials are not set in the environment, fallback to a default or block
+		if user == "" || pass == "" {
+			user = "admin"
+			pass = "admin123" // Fallback default if not defined to ensure protection
+		}
+
+		u, p, ok := r.BasicAuth()
+		if !ok || u != user || p != pass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted Area"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func main() {
-	databaseURL := os.Getenv("DATABASE_URL")
+	databaseURL := strings.TrimSpace(strings.Trim(os.Getenv("DATABASE_URL"), "\""))
 	if databaseURL != "" {
 		InitDB(databaseURL)
 	} else {
@@ -37,13 +65,21 @@ func main() {
 		}
 		http.NotFound(w, r)
 	})
+	
+	// Webhook remains unprotected (public for Meta)
 	http.HandleFunc("/webhook", WebhookHandler)
-	http.HandleFunc("/monitor", HandleMonitorInterface)
-	http.HandleFunc("/monitor/stream", HandleMonitorStream)
-	http.HandleFunc("/api/orders", HandleOrdersAPI)
-	http.HandleFunc("/api/inventory", HandleInventoryAPI)
-	http.HandleFunc("/api/dashboard", HandleDashboardAPI)
-	http.HandleFunc("/admin", HandleAdminInterface)
+	
+	// Protected UI Routes
+	http.HandleFunc("/monitor", basicAuth(HandleMonitorInterface))
+	http.HandleFunc("/monitor/stream", basicAuth(HandleMonitorStream))
+	http.HandleFunc("/admin", basicAuth(HandleAdminInterface))
+
+	// Protected API Routes
+	http.HandleFunc("/api/test_error", HandleTestGeminiError)
+	http.HandleFunc("/api/orders", basicAuth(HandleOrdersAPI))
+	http.HandleFunc("/api/inventory", basicAuth(HandleInventoryAPI))
+	http.HandleFunc("/api/dashboard", basicAuth(HandleDashboardAPI))
+	http.HandleFunc("/api/system_status", basicAuth(HandleSystemStatusAPI))
 
 	log.Println("⚡ Webhook escuchando en: http://localhost:" + port + "/webhook")
 	log.Println("🖥️ Monitor disponible en: http://localhost:" + port + "/monitor")
