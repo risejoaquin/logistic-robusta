@@ -18,12 +18,6 @@ func basicAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		user := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_USER"), "\""))
 		pass := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_PASS"), "\""))
-		
-		// If credentials are not set in the environment, fallback to a default or block
-		if user == "" || pass == "" {
-			user = "admin"
-			pass = "admin123" // Fallback default if not defined to ensure protection
-		}
 
 		u, p, ok := r.BasicAuth()
 		if !ok || u != user || p != pass {
@@ -36,6 +30,12 @@ func basicAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func main() {
+	adminUser := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_USER"), "\""))
+	adminPass := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_PASS"), "\""))
+	if adminUser == "" || adminPass == "" {
+		log.Fatal("CRITICAL ERROR: Variables de entorno ADMIN_USER y ADMIN_PASS son obligatorias (Fail-Fast).")
+	}
+
 	databaseURL := strings.TrimSpace(strings.Trim(os.Getenv("DATABASE_URL"), "\""))
 	if databaseURL != "" {
 		InitDB(databaseURL)
@@ -74,15 +74,40 @@ func main() {
 	http.HandleFunc("/monitor/stream", basicAuth(HandleMonitorStream))
 	http.HandleFunc("/admin", basicAuth(HandleAdminInterface))
 
+	// CORS preflight global para /api/ en adelante
+	http.HandleFunc("OPTIONS /api/", func(w http.ResponseWriter, r *http.Request) {
+		if enableCors(&w, r) {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+		}
+	})
+
 	// Protected API Routes
-	http.HandleFunc("/api/test_error", HandleTestGeminiError)
-	http.HandleFunc("/api/orders", basicAuth(HandleOrdersAPI))
-	http.HandleFunc("/api/inventory", basicAuth(HandleInventoryAPI))
-	http.HandleFunc("/api/dashboard", basicAuth(HandleDashboardAPI))
-	http.HandleFunc("/api/system_status", basicAuth(HandleSystemStatusAPI))
-	http.HandleFunc("/api/tickets", basicAuth(HandleTicketsAPI))
-	http.HandleFunc("/api/accounting", basicAuth(HandleAccountingAPI))
-	http.HandleFunc("/api/menu", basicAuth(HandleMenuAPI))
+	http.HandleFunc("GET /api/test_error", HandleTestGeminiError)
+	http.HandleFunc("GET /api/orders", basicAuth(GetOrdersAPI))
+	http.HandleFunc("POST /api/orders", basicAuth(CreateOrderAPI))
+	http.HandleFunc("PUT /api/orders", basicAuth(UpdateOrderAPI))
+	http.HandleFunc("DELETE /api/orders", basicAuth(DeleteOrderAPI))
+	
+	http.HandleFunc("GET /api/inventory", basicAuth(GetInventoryAPI))
+	http.HandleFunc("POST /api/inventory", basicAuth(CreateInventoryAPI))
+	http.HandleFunc("PUT /api/inventory", basicAuth(UpdateInventoryAPI))
+	http.HandleFunc("DELETE /api/inventory", basicAuth(DeleteInventoryAPI))
+	
+	http.HandleFunc("GET /api/dashboard", basicAuth(GetDashboardAPI))
+	http.HandleFunc("GET /api/system_status", basicAuth(GetSystemStatusAPI))
+	
+	http.HandleFunc("GET /api/tickets", basicAuth(GetTicketsAPI))
+	http.HandleFunc("PUT /api/tickets", basicAuth(UpdateTicketAPI))
+	
+	http.HandleFunc("GET /api/accounting", basicAuth(GetAccountingAPI))
+	http.HandleFunc("POST /api/accounting", basicAuth(CreateAccountingAPI))
+	
+	http.HandleFunc("GET /api/menu", basicAuth(GetMenuAPI))
+	http.HandleFunc("POST /api/menu", basicAuth(CreateMenuAPI))
+	http.HandleFunc("PUT /api/menu", basicAuth(UpdateMenuAPI))
+	http.HandleFunc("DELETE /api/menu", basicAuth(DeleteMenuAPI))
 
 	log.Println("⚡ Webhook escuchando en: http://localhost:" + port + "/webhook")
 	log.Println("🖥️ Monitor disponible en: http://localhost:" + port + "/monitor")

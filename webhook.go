@@ -86,7 +86,7 @@ func WebhookHandler(w http.ResponseWriter, r *http.Request) {
 						
 						// Si logramos extraer número y texto, procesamos el mensaje real
 						if phone != "" && text != "" {
-							ProcessMessage(phone, text)
+							go ProcessMessage(phone, text)
 							w.WriteHeader(http.StatusOK)
 							return
 						}

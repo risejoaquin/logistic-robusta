@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
 
 type GeminiDecision struct {
@@ -148,7 +149,31 @@ ESTRUCTURA STRICTA MULTI-PROPOSITO (SIEMPRE RETORNA ESTE JSON):
 `
 }
 
-var chatMemory = make(map[string]string)
+type ChatSession struct {
+	History    string
+	LastUpdate time.Time
+}
+
+var (
+	chatMemoryMutex sync.RWMutex
+	chatMemory      = make(map[string]ChatSession)
+)
+
+func init() {
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour) // Cada hora limpiar
+			chatMemoryMutex.Lock()
+			now := time.Now()
+			for phone, session := range chatMemory {
+				if now.Sub(session.LastUpdate) > 2*time.Hour {
+					delete(chatMemory, phone)
+				}
+			}
+			chatMemoryMutex.Unlock()
+		}
+	}()
+}
 
 func callGeminiWithModel(model string, apiKey string, requestBody GeminiRequest) ([]byte, int, error) {
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
@@ -181,12 +206,18 @@ func CallGemini(phone string, userMessage string) (GeminiDecision, error) {
 	}
 
 	// Agregar a historial muy básico (limitar a últimos 500 chars para no crecer infinito)
-	historial := chatMemory[phone]
+	chatMemoryMutex.Lock()
+	session := chatMemory[phone]
+	historial := session.History
 	historial += "\nCliente: " + userMessage
 	if len(historial) > 1000 {
 		historial = historial[len(historial)-1000:]
 	}
-	chatMemory[phone] = historial
+	chatMemory[phone] = ChatSession{
+		History:    historial,
+		LastUpdate: time.Now(),
+	}
+	chatMemoryMutex.Unlock()
 
 	if dynamicBotPrompt == "" {
 		UpdateGeminiPrompt()
@@ -263,12 +294,18 @@ func CallGemini(phone string, userMessage string) (GeminiDecision, error) {
 	}
 
 	// Almacenar respuesta del bot en el historial para contexto
-	chatMemory[phone] += "\nBot: " + decision.ResponseText
+	chatMemoryMutex.Lock()
+	session = chatMemory[phone]
+	session.History += "\nBot: " + decision.ResponseText
+	session.LastUpdate = time.Now()
 
 	if decision.IsOrderComplete {
 		// Limpiar el historial una vez completada la orden para futuras ordens
 		delete(chatMemory, phone)
+	} else {
+		chatMemory[phone] = session
 	}
+	chatMemoryMutex.Unlock()
 
 	return decision, nil
 }
