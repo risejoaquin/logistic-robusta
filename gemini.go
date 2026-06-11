@@ -63,7 +63,10 @@ type GeminiResponse struct {
 	} `json:"candidates"`
 }
 
-var dynamicBotPrompt string
+var (
+	dynamicBotPrompt string
+	promptMutex      sync.RWMutex
+)
 
 func UpdateGeminiPrompt() {
 	if DB == nil {
@@ -84,6 +87,7 @@ func UpdateGeminiPrompt() {
 		menuItemsStr = "- (No se pudo cargar el menú dinámico)\n"
 	}
 
+	promptMutex.Lock()
 	dynamicBotPrompt = fmt.Sprintf(`Eres el asistente virtual simpático y experto de SUSHI LOSPLEBES. 
 Tu objetivo es ayudar a los clientes a armar su orden de sushi paso a paso por WhatsApp.
 
@@ -147,6 +151,7 @@ ESTRUCTURA STRICTA MULTI-PROPOSITO (SIEMPRE RETORNA ESTE JSON):
   }
 }
 `
+	promptMutex.Unlock()
 }
 
 type ChatSession struct {
@@ -175,6 +180,8 @@ func init() {
 	}()
 }
 
+var globalHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 func callGeminiWithModel(model string, apiKey string, requestBody GeminiRequest) ([]byte, int, error) {
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
 	jsonData, err := json.Marshal(requestBody)
@@ -188,8 +195,7 @@ func callGeminiWithModel(model string, apiKey string, requestBody GeminiRequest)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := globalHTTPClient.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -219,13 +225,20 @@ func CallGemini(phone string, userMessage string) (GeminiDecision, error) {
 	}
 	chatMemoryMutex.Unlock()
 
-	if dynamicBotPrompt == "" {
+	promptMutex.RLock()
+	currentPrompt := dynamicBotPrompt
+	promptMutex.RUnlock()
+
+	if currentPrompt == "" {
 		UpdateGeminiPrompt()
+		promptMutex.RLock()
+		currentPrompt = dynamicBotPrompt
+		promptMutex.RUnlock()
 	}
 
 	reqData := GeminiRequest{
 		SystemInstruction: &SystemInst{
-			Parts: []Part{{Text: dynamicBotPrompt}},
+			Parts: []Part{{Text: currentPrompt}},
 		},
 		Contents: []MessageContent{
 			{

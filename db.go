@@ -109,6 +109,12 @@ func crearTablasAutomaticas() {
 		DB.Exec(context.Background(), "ALTER TABLE orders ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
 		DB.Exec(context.Background(), "ALTER TABLE earnings ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
 		
+		// Añadir validación de inventario negativo
+		_, errConstraint := DB.Exec(context.Background(), "ALTER TABLE inventory ADD CONSTRAINT check_qty_positive CHECK (quantity >= 0)")
+		if errConstraint != nil {
+			log.Printf("INFO: constraint check_qty_positive ya existe o fallo: %v", errConstraint)
+		}
+		
 		// Llenar inventario para al menos 10 sushis si está vacío o para pruebas
 		seedInventory(DB)
 

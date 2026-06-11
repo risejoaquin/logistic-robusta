@@ -45,7 +45,7 @@ func GetOrdersAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if DB == nil { http.Error(w, `{"error": "Database not connected"}`, http.StatusInternalServerError); return }
 
-	rows, err := DB.Query(context.Background(), "SELECT id, nombre, telefono, detalles_orden, direccion_entrega, metodo_pago, subtotal, tax, shipping, total, status, created_at FROM orders ORDER BY id DESC")
+	rows, err := DB.Query(r.Context(), "SELECT id, nombre, telefono, detalles_orden, direccion_entrega, metodo_pago, subtotal, tax, shipping, total, status, created_at FROM orders ORDER BY id DESC")
 	if err != nil {
 		log.Printf("ERROR: GET /api/orders failed: %v", err)
 		http.Error(w, `{"error": "Failed to fetch orders"}`, http.StatusInternalServerError)
@@ -102,7 +102,7 @@ func CreateOrderAPI(w http.ResponseWriter, r *http.Request) {
 	shipping, _ := req["shipping"].(float64)
 	total, _ := req["total"].(float64)
 
-	id, err := InsertOrder(context.Background(), nombre, telefono, detalles, direccion, pago, subtotal, tax, shipping, total, map[string]int{})
+	id, err := InsertOrder(r.Context(), nombre, telefono, detalles, direccion, pago, subtotal, tax, shipping, total, map[string]int{})
 	if err != nil {
 		http.Error(w, `{"error": "Failed to insert order"}`, http.StatusInternalServerError)
 		return
@@ -134,7 +134,7 @@ func UpdateOrderAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	status, _ := req["status"].(string)
 
-	_, err := DB.Exec(context.Background(), "UPDATE orders SET status = $1 WHERE id = $2", status, int(idFloat))
+	_, err := DB.Exec(r.Context(), "UPDATE orders SET status = $1 WHERE id = $2", status, int(idFloat))
 	if err != nil {
 		http.Error(w, `{"error": "Failed to update order"}`, http.StatusInternalServerError)
 		return
@@ -154,7 +154,7 @@ func DeleteOrderAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	_, err = DB.Exec(context.Background(), "DELETE FROM orders WHERE id = $1", id)
+	_, err = DB.Exec(r.Context(), "DELETE FROM orders WHERE id = $1", id)
 	if err != nil {
 		http.Error(w, `{"error": "Failed to delete order"}`, http.StatusInternalServerError)
 		return
@@ -168,7 +168,7 @@ func GetInventoryAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if DB == nil { http.Error(w, `{"error": "Database not connected"}`, http.StatusInternalServerError); return }
 
-	rows, err := DB.Query(context.Background(), "SELECT MIN(id) as id, item, SUM(quantity) as quantity FROM inventory GROUP BY item ORDER BY item ASC")
+	rows, err := DB.Query(r.Context(), "SELECT MIN(id) as id, item, SUM(quantity) as quantity FROM inventory GROUP BY item ORDER BY item ASC")
 	if err != nil {
 		log.Printf("ERROR: GET /api/inventory failed: %v", err)
 		http.Error(w, `{"error": "Failed to fetch inventory"}`, http.StatusInternalServerError)
@@ -202,7 +202,7 @@ func CreateInventoryAPI(w http.ResponseWriter, r *http.Request) {
 	item, _ := req["item"].(string)
 	quantity, _ := req["quantity"].(float64)
 
-	_, err := DB.Exec(context.Background(), "INSERT INTO inventory (item, quantity) VALUES ($1, $2)", item, int(quantity))
+	_, err := DB.Exec(r.Context(), "INSERT INTO inventory (item, quantity) VALUES ($1, $2)", item, int(quantity))
 	if err != nil {
 		http.Error(w, `{"error": "Failed to add inventory item"}`, http.StatusInternalServerError)
 		return
@@ -228,9 +228,9 @@ func UpdateInventoryAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	quantity, _ := req["quantity"].(float64)
 
-	_, err := DB.Exec(context.Background(), "DELETE FROM inventory WHERE item = $1", item)
+	_, err := DB.Exec(r.Context(), "DELETE FROM inventory WHERE item = $1", item)
 	if err == nil {
-		_, err = DB.Exec(context.Background(), "INSERT INTO inventory (item, quantity) VALUES ($1, $2)", item, int(quantity))
+		_, err = DB.Exec(r.Context(), "INSERT INTO inventory (item, quantity) VALUES ($1, $2)", item, int(quantity))
 	}
 	
 	if err != nil {
@@ -251,7 +251,7 @@ func DeleteInventoryAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	_, err := DB.Exec(context.Background(), "DELETE FROM inventory WHERE item = $1", item)
+	_, err := DB.Exec(r.Context(), "DELETE FROM inventory WHERE item = $1", item)
 	if err != nil {
 		http.Error(w, `{"error": "Failed to delete item"}`, http.StatusInternalServerError)
 		return
@@ -265,7 +265,7 @@ func GetDashboardAPI(w http.ResponseWriter, r *http.Request) {
 	if DB == nil { http.Error(w, `{"error": "Database not connected"}`, http.StatusInternalServerError); return }
 
 	var dailyGanancias, weeklyGanancias, monthlyGanancias, totalGanancias float64
-	DB.QueryRow(context.Background(), `
+	DB.QueryRow(r.Context(), `
 		SELECT 
 			COALESCE(SUM(amount), 0),
 			COALESCE(SUM(amount) FILTER (WHERE created_at >= CURRENT_DATE), 0),
@@ -275,10 +275,10 @@ func GetDashboardAPI(w http.ResponseWriter, r *http.Request) {
 	`).Scan(&totalGanancias, &dailyGanancias, &weeklyGanancias, &monthlyGanancias)
 
 	var pendingOrders int
-	err := DB.QueryRow(context.Background(), "SELECT COUNT(*) FROM orders WHERE status = 'PENDING'").Scan(&pendingOrders)
+	err := DB.QueryRow(r.Context(), "SELECT COUNT(*) FROM orders WHERE status = 'PENDING'").Scan(&pendingOrders)
 	if err != nil { log.Printf("ERROR: GET /api/dashboard failed to count orders: %v", err) }
 
-	rows, err := DB.Query(context.Background(), "SELECT metodo_pago, SUM(total) FROM orders GROUP BY metodo_pago")
+	rows, err := DB.Query(r.Context(), "SELECT metodo_pago, SUM(total) FROM orders GROUP BY metodo_pago")
 	var salesByPayment []map[string]interface{}
 	if err == nil {
 		defer rows.Close()
@@ -320,7 +320,7 @@ func GetTicketsAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if DB == nil { http.Error(w, `{"error": "Database not connected"}`, http.StatusInternalServerError); return }
 
-	rows, err := DB.Query(context.Background(), "SELECT id, telefono, mensaje, status, created_at FROM support_tickets ORDER BY id DESC")
+	rows, err := DB.Query(r.Context(), "SELECT id, telefono, mensaje, status, created_at FROM support_tickets ORDER BY id DESC")
 	if err != nil {
 		log.Printf("ERROR: GET /api/tickets failed: %v", err)
 		http.Error(w, `{"error": "Failed to fetch tickets"}`, http.StatusInternalServerError)
@@ -364,7 +364,7 @@ func UpdateTicketAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	status, _ := req["status"].(string)
 
-	_, err := DB.Exec(context.Background(), "UPDATE support_tickets SET status=$1 WHERE id=$2", status, int(idf))
+	_, err := DB.Exec(r.Context(), "UPDATE support_tickets SET status=$1 WHERE id=$2", status, int(idf))
 	if err != nil {
 		http.Error(w, `{"error": "Update failed"}`, http.StatusInternalServerError)
 		return
@@ -379,7 +379,7 @@ func GetAccountingAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if DB == nil { http.Error(w, `{"error": "Database not connected"}`, http.StatusInternalServerError); return }
 
-	rows, err := DB.Query(context.Background(), "SELECT id, description, amount, category, created_at FROM expenses ORDER BY id DESC")
+	rows, err := DB.Query(r.Context(), "SELECT id, description, amount, category, created_at FROM expenses ORDER BY id DESC")
 	if err != nil {
 		log.Printf("ERROR: GET /api/accounting expenses: %v", err)
 		http.Error(w, `{"error": "Failed to fetch expenses"}`, http.StatusInternalServerError)
@@ -405,12 +405,12 @@ func GetAccountingAPI(w http.ResponseWriter, r *http.Request) {
 	if expenses == nil { expenses = make([]map[string]interface{}, 0) }
 	
 	var totalExpenses float64
-	DB.QueryRow(context.Background(), "SELECT COALESCE(SUM(amount), 0) FROM expenses").Scan(&totalExpenses)
+	DB.QueryRow(r.Context(), "SELECT COALESCE(SUM(amount), 0) FROM expenses").Scan(&totalExpenses)
 	
 	var totalEarnings float64
-	DB.QueryRow(context.Background(), "SELECT COALESCE(SUM(amount), 0) FROM earnings").Scan(&totalEarnings)
+	DB.QueryRow(r.Context(), "SELECT COALESCE(SUM(amount), 0) FROM earnings").Scan(&totalEarnings)
 	
-	rowsCat, _ := DB.Query(context.Background(), "SELECT category, SUM(amount) FROM expenses GROUP BY category")
+	rowsCat, _ := DB.Query(r.Context(), "SELECT category, SUM(amount) FROM expenses GROUP BY category")
 	var expensesByCategory []map[string]interface{}
 	if rowsCat != nil {
 		defer rowsCat.Close()
@@ -445,7 +445,7 @@ func CreateAccountingAPI(w http.ResponseWriter, r *http.Request) {
 	amount, _ := req["amount"].(float64)
 	cat, _ := req["category"].(string)
 	
-	_, err := DB.Exec(context.Background(), "INSERT INTO expenses (description, amount, category) VALUES ($1, $2, $3)", desc, amount, cat)
+	_, err := DB.Exec(r.Context(), "INSERT INTO expenses (description, amount, category) VALUES ($1, $2, $3)", desc, amount, cat)
 	if err != nil {
 		http.Error(w, `{"error": "Insert failed"}`, http.StatusInternalServerError)
 		return
@@ -458,7 +458,7 @@ func GetMenuAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if DB == nil { http.Error(w, `{"error": "Database not connected"}`, http.StatusInternalServerError); return }
 
-	rows, err := DB.Query(context.Background(), "SELECT id, name, description, price, category, is_active FROM menu_items ORDER BY id ASC")
+	rows, err := DB.Query(r.Context(), "SELECT id, name, description, price, category, is_active FROM menu_items ORDER BY id ASC")
 	if err != nil {
 		http.Error(w, `{"error": "Failed to fetch menu items"}`, http.StatusInternalServerError)
 		return
@@ -501,7 +501,7 @@ func CreateMenuAPI(w http.ResponseWriter, r *http.Request) {
 	price, _ := req["price"].(float64)
 	cat, _ := req["category"].(string)
 	
-	_, err := DB.Exec(context.Background(), "INSERT INTO menu_items (name, description, price, category) VALUES ($1, $2, $3, $4)", name, desc, price, cat)
+	_, err := DB.Exec(r.Context(), "INSERT INTO menu_items (name, description, price, category) VALUES ($1, $2, $3, $4)", name, desc, price, cat)
 	if err != nil {
 		http.Error(w, `{"error": "Insert failed"}`, http.StatusInternalServerError)
 		return
@@ -522,13 +522,13 @@ func UpdateMenuAPI(w http.ResponseWriter, r *http.Request) {
 
 	if action, ok := req["action"].(string); ok && action == "toggle" {
 		isActive, _ := req["is_active"].(bool)
-		DB.Exec(context.Background(), "UPDATE menu_items SET is_active=$1 WHERE id=$2", isActive, id)
+		DB.Exec(r.Context(), "UPDATE menu_items SET is_active=$1 WHERE id=$2", isActive, id)
 	} else {
 		name, _ := req["name"].(string)
 		desc, _ := req["description"].(string)
 		price, _ := req["price"].(float64)
 		cat, _ := req["category"].(string)
-		DB.Exec(context.Background(), "UPDATE menu_items SET name=$1, description=$2, price=$3, category=$4 WHERE id=$5", name, desc, price, cat, id)
+		DB.Exec(r.Context(), "UPDATE menu_items SET name=$1, description=$2, price=$3, category=$4 WHERE id=$5", name, desc, price, cat, id)
 	}
 	UpdateGeminiPrompt()
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -543,7 +543,7 @@ func DeleteMenuAPI(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&req)
 	idFloat, _ := req["id"].(float64)
 	
-	DB.Exec(context.Background(), "DELETE FROM menu_items WHERE id=$1", int(idFloat))
+	DB.Exec(r.Context(), "DELETE FROM menu_items WHERE id=$1", int(idFloat))
 	UpdateGeminiPrompt()
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

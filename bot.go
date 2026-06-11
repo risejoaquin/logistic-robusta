@@ -13,6 +13,16 @@ import (
 	"time"
 )
 
+var hermosilloLock *time.Location
+
+func init() {
+	loc, err := time.LoadLocation("America/Hermosillo")
+	if err != nil {
+		loc = time.FixedZone("UTC-7", -7*60*60) // Fallback si tzdata no está disponible
+	}
+	hermosilloLock = loc
+}
+
 func SendWhatsAppMessage(phone string, message string) error {
 	token := strings.TrimSpace(strings.Trim(os.Getenv("WHATSAPP_ACCESS_TOKEN"), "\""))
 	phoneNumberID := strings.TrimSpace(strings.Trim(os.Getenv("WHATSAPP_PHONE_ID"), "\"")) // ID del número de origen desde Meta
@@ -45,8 +55,7 @@ func SendWhatsAppMessage(phone string, message string) error {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := globalHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -95,8 +104,7 @@ func SendWhatsAppImage(phone string, imageUrl string) error {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := globalHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -116,11 +124,7 @@ func ProcessMessage(phone string, text string) {
 	log.Printf("Bot received message from %s: %s", phone, text)
 
 	// Horario de atención: 11:00 AM a 11:00 PM (Hora Hermosillo / UTC-7)
-	loc, err := time.LoadLocation("America/Hermosillo")
-	if err != nil {
-		loc = time.FixedZone("UTC-7", -7*60*60) // Fallback si tzdata no está disponible
-	}
-	now := time.Now().In(loc)
+	now := time.Now().In(hermosilloLock)
 	if now.Hour() < 11 || now.Hour() >= 23 {
 		log.Printf("Message received outside business hours from %s", phone)
 		SendWhatsAppMessage(phone, "¡Hola! Gracias por comunicarte con Sushi Los Plebes. 🍣\n\nActualmente nuestro restaurante se encuentra cerrado. Nuestro horario de atención es todos los días de 11:00 AM a 11:00 PM.\n\nPor favor contáctanos mañana en horario laboral y con gusto tomaremos tu pedido. ¡Que pases buena noche! 🌙")
