@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // enableCors restricts CORS headers for frontend accessibility
@@ -16,7 +17,7 @@ func enableCors(w *http.ResponseWriter, r *http.Request) bool {
 	if origin == "" {
 		return true // Request from same-origin without origin header string
 	}
-	frontendURL := os.Getenv("FRONTEND_URL")
+	frontendURL := AppConfig.FrontendURL
 	if frontendURL == "" {
 		(*w).Header().Set("Access-Control-Allow-Origin", origin) // Fallback for dev mode
 	} else if origin == frontendURL {
@@ -97,10 +98,15 @@ func CreateOrderAPI(w http.ResponseWriter, r *http.Request) {
 	detalles, _ := req["detalles_orden"].(string)
 	direccion, _ := req["direccion_entrega"].(string)
 	pago, _ := req["metodo_pago"].(string)
-	subtotal, _ := req["subtotal"].(float64)
-	tax, _ := req["tax"].(float64)
-	shipping, _ := req["shipping"].(float64)
-	total, _ := req["total"].(float64)
+	subtotalF, _ := req["subtotal"].(float64)
+	taxF, _ := req["tax"].(float64)
+	shippingF, _ := req["shipping"].(float64)
+	totalF, _ := req["total"].(float64)
+	
+	subtotal := decimal.NewFromFloat(subtotalF).Round(2)
+	tax := decimal.NewFromFloat(taxF).Round(2)
+	shipping := decimal.NewFromFloat(shippingF).Round(2)
+	total := decimal.NewFromFloat(totalF).Round(2)
 
 	id, err := InsertOrder(r.Context(), nombre, telefono, detalles, direccion, pago, subtotal, tax, shipping, total, map[string]int{})
 	if err != nil {
@@ -228,8 +234,8 @@ func UpdateInventoryAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	quantity, _ := req["quantity"].(float64)
 
-	_, err := DB.Exec(r.Context(), "DELETE FROM inventory WHERE item = $1", item)
-	if err == nil {
+	tag, err := DB.Exec(r.Context(), "UPDATE inventory SET quantity = $1 WHERE item = $2", int(quantity), item)
+	if err == nil && tag.RowsAffected() == 0 {
 		_, err = DB.Exec(r.Context(), "INSERT INTO inventory (item, quantity) VALUES ($1, $2)", item, int(quantity))
 	}
 	
@@ -442,8 +448,10 @@ func CreateAccountingAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	desc, _ := req["description"].(string)
-	amount, _ := req["amount"].(float64)
+	amountF, _ := req["amount"].(float64)
 	cat, _ := req["category"].(string)
+
+	amount := decimal.NewFromFloat(amountF).Round(2)
 	
 	_, err := DB.Exec(r.Context(), "INSERT INTO expenses (description, amount, category) VALUES ($1, $2, $3)", desc, amount, cat)
 	if err != nil {
@@ -498,8 +506,10 @@ func CreateMenuAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	name, _ := req["name"].(string)
 	desc, _ := req["description"].(string)
-	price, _ := req["price"].(float64)
+	priceF, _ := req["price"].(float64)
 	cat, _ := req["category"].(string)
+
+	price := decimal.NewFromFloat(priceF).Round(2)
 	
 	_, err := DB.Exec(r.Context(), "INSERT INTO menu_items (name, description, price, category) VALUES ($1, $2, $3, $4)", name, desc, price, cat)
 	if err != nil {
@@ -526,8 +536,10 @@ func UpdateMenuAPI(w http.ResponseWriter, r *http.Request) {
 	} else {
 		name, _ := req["name"].(string)
 		desc, _ := req["description"].(string)
-		price, _ := req["price"].(float64)
+		priceF, _ := req["price"].(float64)
 		cat, _ := req["category"].(string)
+		
+		price := decimal.NewFromFloat(priceF).Round(2)
 		DB.Exec(r.Context(), "UPDATE menu_items SET name=$1, description=$2, price=$3, category=$4 WHERE id=$5", name, desc, price, cat, id)
 	}
 	UpdateGeminiPrompt()

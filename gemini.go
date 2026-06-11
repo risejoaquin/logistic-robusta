@@ -11,6 +11,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 type GeminiDecision struct {
@@ -22,10 +25,10 @@ type GeminiDecision struct {
 	OrderDetails      string         `json:"order_details"`
 	DeliveryAddress   string         `json:"delivery_address"`
 	PaymentMethod     string         `json:"payment_method"`
-	Subtotal          float64        `json:"subtotal"`
-	Shipping          float64        `json:"shipping"`
-	Tax               float64        `json:"tax"`
-	Total             float64        `json:"total"`
+	Subtotal          decimal.Decimal `json:"subtotal"`
+	Shipping          decimal.Decimal `json:"shipping"`
+	Tax               decimal.Decimal `json:"tax"`
+	Total             decimal.Decimal `json:"total"`
 	InventoryToRemove map[string]int `json:"inventory_to_remove"`
 }
 
@@ -206,7 +209,7 @@ func callGeminiWithModel(model string, apiKey string, requestBody GeminiRequest)
 }
 
 func CallGemini(phone string, userMessage string) (GeminiDecision, error) {
-	apiKey := strings.TrimSpace(strings.Trim(os.Getenv("GEMINI_API_KEY"), "\""))
+	apiKey := AppConfig.GeminiAPIKey
 	if apiKey == "" {
 		return GeminiDecision{}, fmt.Errorf("GEMINI_API_KEY no configurado")
 	}

@@ -5,7 +5,11 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 func basicAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -16,8 +20,8 @@ func basicAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		user := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_USER"), "\""))
-		pass := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_PASS"), "\""))
+		user := AppConfig.AdminUser
+		pass := AppConfig.AdminPass
 
 		u, p, ok := r.BasicAuth()
 		if !ok || u != user || p != pass {
@@ -30,35 +34,24 @@ func basicAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func main() {
-	adminUser := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_USER"), "\""))
-	adminPass := strings.TrimSpace(strings.Trim(os.Getenv("ADMIN_PASS"), "\""))
-	if adminUser == "" || adminPass == "" {
-		log.Fatal("CRITICAL ERROR: Variables de entorno ADMIN_USER y ADMIN_PASS son obligatorias (Fail-Fast).")
+	decimal.MarshalJSONWithoutQuotes = true
+	LoadConfig()
+
+	InitDB(AppConfig.DatabaseURL)
+	if DB == nil {
+		log.Fatal("ERROR CRÍTICO: No se puede operar sin conexión a PostgreSQL")
 	}
 
-	databaseURL := strings.TrimSpace(strings.Trim(os.Getenv("DATABASE_URL"), "\""))
-	if databaseURL != "" {
-		InitDB(databaseURL)
+	if err := DB.Ping(context.Background()); err == nil {
+		log.Println("✅ Verificación de DB: Conexión y Ping exitosos antes de iniciar el servidor.")
 	} else {
-		log.Println("WARNING: DATABASE_URL no provista")
+		log.Fatalf("CRITICAL ERROR: El Ping a la base de datos falló: %v\n", err)
 	}
 
-	if DB != nil {
-		if err := DB.Ping(context.Background()); err == nil {
-			log.Println("✅ Verificación de DB: Conexión y Ping exitosos antes de iniciar el servidor.")
-		} else {
-			log.Printf("⚠️ Verificación de DB: El Ping a la base de datos falló: %v\n", err)
-		}
-	} else {
-		log.Println("⚠️ Verificación de DB: Operando sin conexión a base de datos activa (DB es nil).")
-	}
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3000"
-	}
+	port := AppConfig.Port
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/admin", http.StatusFound)
 			return
@@ -113,8 +106,23 @@ func main() {
 	log.Println("🖥️ Monitor disponible en: http://localhost:" + port + "/monitor")
 	log.Println("📊 Panel Admin disponible en: http://localhost:" + port + "/admin")
 	
-	err := http.ListenAndServe("0.0.0.0:"+port, nil)
-	if err != nil {
-		log.Fatalf("CRITICAL ERROR: El servidor colapsó: %v\n", err)
+	srv := &http.Server{Addr: "0.0.0.0:" + port, Handler: nil}
+	
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("CRITICAL ERROR: El servidor colapsó: %v\n", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server gracefully...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+	log.Println("Server exiting")
 }

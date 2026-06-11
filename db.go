@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 var DB *pgxpool.Pool
@@ -177,7 +178,7 @@ func seedInventory(db *pgxpool.Pool) {
 	log.Println("🚀 INVENTARIO RESETEADO A 10 (HARD RESET)")
 }
 
-func InsertOrder(ctx context.Context, nombre, telefono, detalles, direccion, pago string, subtotal, tax, shipping, total float64, inventoryToRemove map[string]int) (int, error) {
+func InsertOrder(ctx context.Context, nombre, telefono, detalles, direccion, pago string, subtotal, tax, shipping, total decimal.Decimal, inventoryToRemove map[string]int) (int, error) {
 	tx, err := DB.Begin(ctx)
 	if err != nil {
 		return 0, err

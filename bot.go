@@ -24,8 +24,8 @@ func init() {
 }
 
 func SendWhatsAppMessage(phone string, message string) error {
-	token := strings.TrimSpace(strings.Trim(os.Getenv("WHATSAPP_ACCESS_TOKEN"), "\""))
-	phoneNumberID := strings.TrimSpace(strings.Trim(os.Getenv("WHATSAPP_PHONE_ID"), "\"")) // ID del número de origen desde Meta
+	token := AppConfig.WhatsAppToken
+	phoneNumberID := AppConfig.WhatsAppPhoneID // ID del número de origen desde Meta
 
 	if token == "" || phoneNumberID == "" {
 		log.Println("WARNING: WHATSAPP_ACCESS_TOKEN o WHATSAPP_PHONE_ID no están configurados. No se enviará mensaje real.")
@@ -74,8 +74,8 @@ func SendWhatsAppMessage(phone string, message string) error {
 }
 
 func SendWhatsAppImage(phone string, imageUrl string) error {
-	token := strings.TrimSpace(strings.Trim(os.Getenv("WHATSAPP_ACCESS_TOKEN"), "\""))
-	phoneNumberID := strings.TrimSpace(strings.Trim(os.Getenv("WHATSAPP_PHONE_ID"), "\""))
+	token := AppConfig.WhatsAppToken
+	phoneNumberID := AppConfig.WhatsAppPhoneID
 
 	if token == "" || phoneNumberID == "" || imageUrl == "" {
 		return fmt.Errorf("credenciales faltantes o url vacia")
@@ -143,7 +143,7 @@ func ProcessMessage(phone string, text string) {
 
 	// Enviamos imagen del menú si Gemini lo decide
 	if decision.SendMenuImage {
-		menuUrl := strings.TrimSpace(strings.Trim(os.Getenv("MENU_IMAGE_URL"), "\""))
+		menuUrl := AppConfig.MenuImageURL
 		if menuUrl == "" {
 			// Placeholder si no está configurado
 			menuUrl = "https://i.imgur.com/3q17vT9.jpeg" // Imagen ejemplo de sushi
